@@ -7,7 +7,7 @@ set -e  # Exit on error
 
 # Configuration
 DEFAULT_REPO_NAME="sketch2anime"
-DEFAULT_REMOTE_URL="https://github.com/yourusername/sketch2anime.git"
+DEFAULT_REMOTE_URL="https://github.com/zhangyun04/sketch2anime.git"
 
 # Parse arguments
 REPO_NAME=${1:-$DEFAULT_REPO_NAME}
@@ -92,7 +92,7 @@ touch models/.gitkeep data/.gitkeep logs/.gitkeep results/.gitkeep
 # Set Git remote
 if git remote | grep -q "^origin$"; then
     echo "Remote 'origin' already exists. Updating URL to $REMOTE_URL"
-    git remote set-url origin $REMOTE_URL
+    git remote set-url origin git@github.com:zhangyun04/sketch2anime.git
 else
     echo "Setting remote 'origin' to $REMOTE_URL"
     git remote add origin $REMOTE_URL
@@ -111,4 +111,16 @@ git add .
 echo "Repository initialized successfully!"
 echo "Next steps:"
 echo "1. Commit your changes:   git commit -m 'Initial commit'"
-echo "2. Push to remote:        git push -u origin main" 
+echo "2. Push to remote:        git push -u origin main"
+
+git remote -v
+
+git commit -m "Initial commit"
+git push -u origin main
+
+cd /Users/tzy/sketch2anime
+git config --global user.name "您的GitHub用户名"
+git config --global user.email "您的邮箱"
+
+# 使用Personal Access Token或SSH密钥
+# 如果您使用HTTPS链接，可能需要输入GitHub用户名和Token 
