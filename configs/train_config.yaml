@@ -1,0 +1,60 @@
+# Training configuration for Sketch2Anime T2I-Adapter
+
+# Base model configuration
+model:
+  pretrained_model_name_or_path: "stabilityai/stable-diffusion-xl-base-1.0"
+  adapter_model_name_or_path: "TencentARC/t2i-adapter-canny-sdxl-1.0"
+  vae_model_name_or_path: "madebyollin/sdxl-vae-fp16-fix"
+  revision: null
+  variant: "fp16"
+
+# Training configuration
+training:
+  output_dir: "./results"
+  seed: 42
+  resolution: 1024
+  train_batch_size: 1
+  gradient_accumulation_steps: 4
+  learning_rate: 1.0e-5
+  lr_scheduler: "constant"
+  lr_warmup_steps: 0
+  num_train_epochs: 10
+  max_train_steps: 10000
+  checkpointing_steps: 500
+  validation_steps: 100
+  validation_prompt: "anime style, high quality, manga illustration, smooth and simple line, vivid, white background"
+  negative_prompt: "graphic, text, crayon, graphite, abstract, glitch, deformed, mutated, ugly, disfigured, extra digit, fewer digits, cropped, worst quality, low quality"
+
+# Dataset configuration
+dataset:
+  train_data_dir: "./data/train"
+  validation_data_dir: "./data/validation"
+  image_column: "image"
+  sketch_column: "sketch"
+  center_crop: false
+  random_flip: true
+
+# Optimizer configuration
+optimizer:
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_weight_decay: 1.0e-2
+  adam_epsilon: 1.0e-08
+
+# Advanced configuration options
+mixed_precision: "fp16"
+gradient_checkpointing: true
+enable_xformers_memory_efficient_attention: true
+use_8bit_adam: false
+allow_tf32: true
+logging_dir: "./logs"
+report_to: "tensorboard"
+
+# Setting for fine-tuning approach
+# Directly use sketch as conditioning signal instead of Canny edge
+training_approach: "direct_sketch"  # Options: "direct_sketch", "canny_edge"
+
+# Pipeline parameters for inference
+adapter_conditioning_scale: 0.8
+guidance_scale: 7.5
+num_inference_steps: 30 
