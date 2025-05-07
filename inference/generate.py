@@ -8,19 +8,35 @@ Script for generating anime-style images from sketches using the fine-tuned T2I-
 import os
 import sys
 import argparse
+import logging
 import yaml
 import torch
 import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional, Union
 
-from diffusers import StableDiffusionXLAdapterPipeline, EulerAncestralDiscreteScheduler, AutoencoderKL, T2IAdapter
+from diffusers import (
+    AutoencoderKL,
+    DDPMScheduler,
+    EulerAncestralDiscreteScheduler,
+    StableDiffusionXLAdapterPipeline,
+    T2IAdapter,
+)
+from controlnet_aux.canny import CannyDetector
+from diffusers.utils import load_image, make_image_grid
+
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from data_processing.sketch_utils import process_sketch, find_optimal_canny_params
 
 
 def load_config(config_path):
-    """Load configuration from yaml file"""
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
+    """Load configuration from YAML file"""
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+    return config
 
 
 def load_model(model_path=None, config_path=None):
@@ -43,7 +59,8 @@ def load_model(model_path=None, config_path=None):
             "model": {
                 "pretrained_model_name_or_path": "stabilityai/stable-diffusion-xl-base-1.0",
                 "vae_model_name_or_path": "madebyollin/sdxl-vae-fp16-fix",
-                "variant": "fp16"
+                "variant": "fp16",
+                "inference_scheduler": "euler_ancestral"
             },
             "adapter_conditioning_scale": 0.8,
             "guidance_scale": 7.5,
@@ -57,11 +74,20 @@ def load_model(model_path=None, config_path=None):
         torch_dtype=torch.float16 if config.get("mixed_precision") == "fp16" else torch.float32,
     )
     
-    # Load the scheduler
-    scheduler = EulerAncestralDiscreteScheduler.from_pretrained(
-        config["model"]["pretrained_model_name_or_path"],
-        subfolder="scheduler"
-    )
+    # Load the scheduler based on configuration
+    inference_scheduler_type = config["model"].get("inference_scheduler", "euler_ancestral")
+    if inference_scheduler_type.lower() == "ddpm":
+        scheduler = DDPMScheduler.from_pretrained(
+            config["model"]["pretrained_model_name_or_path"],
+            subfolder="scheduler"
+        )
+        print("Using DDPMScheduler for inference")
+    else:
+        scheduler = EulerAncestralDiscreteScheduler.from_pretrained(
+            config["model"]["pretrained_model_name_or_path"],
+            subfolder="scheduler"
+        )
+        print("Using EulerAncestralDiscreteScheduler for inference")
     
     # Load the adapter model
     if model_path:
@@ -78,7 +104,7 @@ def load_model(model_path=None, config_path=None):
             variant=config["model"].get("variant")
         )
     
-    # Create the pipeline
+    # Load the pipeline
     pipeline = StableDiffusionXLAdapterPipeline.from_pretrained(
         config["model"]["pretrained_model_name_or_path"],
         vae=vae,
@@ -88,14 +114,78 @@ def load_model(model_path=None, config_path=None):
         variant=config["model"].get("variant"),
     )
     
-    # Enable memory efficient attention if available
-    try:
-        import xformers
+    # Enable xformers for memory efficiency if available
+    if hasattr(pipeline, "enable_xformers_memory_efficient_attention"):
         pipeline.enable_xformers_memory_efficient_attention()
-    except ImportError:
-        print("xformers not available, using default attention mechanism")
+    
+    # Move to GPU if available
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    pipeline = pipeline.to(device)
     
     return pipeline, config
+
+
+def generate_image(pipeline, sketch_path, prompt=None, negative_prompt=None, config=None, seed=None):
+    """
+    Generate an image from a sketch using the T2I-Adapter pipeline.
+    
+    Args:
+        pipeline: The loaded pipeline
+        sketch_path: Path to the sketch image
+        prompt: Text prompt for generation
+        negative_prompt: Negative text prompt
+        config: Pipeline configuration
+        seed: Random seed for reproducibility
+        
+    Returns:
+        Generated image
+    """
+    if config is None:
+        config = {}
+    
+    # Set default parameters
+    adapter_conditioning_scale = config.get("adapter_conditioning_scale", 0.8)
+    guidance_scale = config.get("guidance_scale", 7.5)
+    num_inference_steps = config.get("num_inference_steps", 30)
+    
+    # Set default prompts if not provided
+    if prompt is None:
+        prompt = "anime style, high quality, detailed, vivid colors, white background"
+    if negative_prompt is None:
+        negative_prompt = "graphic, text, watermark, low quality, ugly, deformed, malformed"
+    
+    # Set seed for reproducibility if provided
+    if seed is not None:
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+    
+    # Determine the processing method from config
+    processing_method = config.get("training_approach", "direct_sketch")
+    
+    # Process the sketch using the utility function
+    processed_image, conditioning_tensor = process_sketch(
+        sketch_path, 
+        method="canny" if processing_method == "canny_edge" else "direct",
+        canny_low=config.get("canny_low_threshold", 100),
+        canny_high=config.get("canny_high_threshold", 200),
+        target_size=config.get("training", {}).get("resolution", 1024)
+    )
+    
+    # Move tensor to the same device as the pipeline
+    conditioning_tensor = conditioning_tensor.to(pipeline.device)
+    
+    # Generate the image
+    image = pipeline(
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        image=conditioning_tensor,
+        num_inference_steps=num_inference_steps,
+        guidance_scale=guidance_scale,
+        adapter_conditioning_scale=adapter_conditioning_scale,
+    ).images[0]
+    
+    return image
 
 
 def process_sketch(sketch_path, output_path, pipeline, config, prompt=None, negative_prompt=None, seed=None):
@@ -130,10 +220,6 @@ def process_sketch(sketch_path, output_path, pipeline, config, prompt=None, nega
     
     # Load and preprocess the sketch
     sketch = Image.open(sketch_path).convert("L")  # Convert to grayscale
-    
-    # Move the pipeline to GPU if available
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    pipeline = pipeline.to(device)
     
     # Generate the image
     output = pipeline(
@@ -229,33 +315,56 @@ def main():
     # Load the model and configuration
     pipeline, config = load_model(args.model_path, args.config)
     
-    # Process images
+    # Batch processing mode
     if args.batch:
         if not args.input_dir or not args.output_dir:
-            parser.error("--input_dir and --output_dir are required for batch processing")
-            
-        batch_process(
-            input_dir=args.input_dir,
-            output_dir=args.output_dir,
-            pipeline=pipeline,
-            config=config,
-            prompt=args.prompt,
-            negative_prompt=args.negative_prompt,
-            seed=args.seed
-        )
+            raise ValueError("For batch processing, both --input_dir and --output_dir must be specified")
+        
+        # Create output directory if it doesn't exist
+        os.makedirs(args.output_dir, exist_ok=True)
+        
+        # Process all images in the input directory
+        for filename in os.listdir(args.input_dir):
+            if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+                sketch_path = os.path.join(args.input_dir, filename)
+                output_path = os.path.join(args.output_dir, f"generated_{filename}")
+                
+                print(f"Processing {filename}...")
+                try:
+                    # Generate the image
+                    image = generate_image(
+                        pipeline=pipeline,
+                        sketch_path=sketch_path,
+                        prompt=args.prompt,
+                        negative_prompt=args.negative_prompt,
+                        config=config,
+                        seed=args.seed
+                    )
+                    
+                    # Save the image
+                    image.save(output_path)
+                    print(f"Saved to {output_path}")
+                except Exception as e:
+                    print(f"Error processing {filename}: {e}")
+    
+    # Single image processing mode
     else:
         if not args.sketch or not args.output:
-            parser.error("--sketch and --output are required for single image processing")
-            
-        process_sketch(
-            sketch_path=args.sketch,
-            output_path=args.output,
+            raise ValueError("Both --sketch and --output must be specified")
+        
+        # Generate the image
+        image = generate_image(
             pipeline=pipeline,
-            config=config,
+            sketch_path=args.sketch,
             prompt=args.prompt,
             negative_prompt=args.negative_prompt,
+            config=config,
             seed=args.seed
         )
+        
+        # Save the image
+        image.save(args.output)
+        print(f"Generated image saved to {args.output}")
 
 
 if __name__ == "__main__":

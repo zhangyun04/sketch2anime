@@ -1,0 +1,8 @@
+Low threshold: 10
+High threshold: 100
+Gaussian blur kernel size: 7
+Aperture size: 7
+Thinning: False
+Average similarity score: 0.2060
+Total time: 4636.1 seconds
+Optimization date: 2025-04-26

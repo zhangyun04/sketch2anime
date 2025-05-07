@@ -7,6 +7,8 @@ model:
   vae_model_name_or_path: "madebyollin/sdxl-vae-fp16-fix"
   revision: null
   variant: "fp16"
+  train_scheduler: "ddpm"  # 训练时使用的scheduler，可选: "ddpm", "euler_ancestral"
+  inference_scheduler: "euler_ancestral"  # 推理时使用的scheduler，可选: "ddpm", "euler_ancestral"
 
 # Training configuration
 training:

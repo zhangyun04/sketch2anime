@@ -1,65 +1,133 @@
 # Sketch2Anime
 
-将素描(Sketch)转换为高质量二次元风格图像的深度学习项目。
+A deep learning project that converts sketches into high-quality anime-style images.
 
-## 项目简介
+## Project Overview
 
-本项目基于Stable Diffusion XL和T2I-Adapter技术，实现从简单素描到精美二次元风格图像的生成。我们提供了两种方法来优化素描到图像的转换过程：
+This project is based on Stable Diffusion XL and T2I-Adapter technology, enabling the generation of beautiful anime-style images from simple sketches. We provide two methods to optimize the sketch-to-image conversion process:
 
-1. **Canny参数优化**：优化Canny边缘检测的超参数，使素描转Canny边缘的过程中尽可能保留细节
-2. **模型微调**：直接使用素描作为控制信号来微调T2I-Adapter模型
+1. **Canny Parameter Optimization**: Optimize Canny edge detection hyperparameters to preserve as much detail as possible when converting sketches to Canny edges
+2. **Model Fine-tuning**: Directly fine-tune the T2I-Adapter model using sketches as control signals
 
-## 项目结构
+## Project Structure
 
 ```
 sketch2anime/
-├── configs/             # 配置文件
-├── data/                # 数据集存放位置
-├── data_processing/     # 数据预处理代码
-├── inference/           # 推理代码
-├── models/              # 预训练模型保存位置
-├── scripts/             # 实用脚本
-├── src/                 # 核心代码
-└── train/               # 训练代码
+├── configs/             # Configuration files
+├── data/                # Dataset storage
+├── data_processing/     # Data preprocessing code
+├── inference/           # Inference code
+├── models/              # Pre-trained model storage
+├── scripts/             # Utility scripts
+└── train/               # Training code
 ```
 
-## 安装
+## Installation
 
 ```bash
-# 克隆仓库
+# Clone the repository
 git clone https://github.com/yourusername/sketch2anime.git
 cd sketch2anime
 
-# 安装依赖
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-## 使用方法
+## Dataset Requirements
 
-### 1. 数据准备
+To successfully train the model, you need to prepare a dataset with the following characteristics:
 
-将sketch-image paired数据集放置于`data/`目录下。
+1. **Format**: Paired sketch-image data
+   - Sketch file naming format: `image_name_sketch.png/jpg`
+   - Corresponding image: `image_name.png/jpg/jpeg`
+   - Optional text prompt: `image_name.txt` (containing image description)
 
-### 2. Canny参数优化
+2. **Quantity**: Recommended at least 500-1000 high-quality sketch-image pairs
 
-运行Canny参数优化实验：
+3. **Quality Requirements**:
+   - Clear sketch lines
+   - High-quality anime-style images
+   - Recommended resolution of 1024×1024 or scalable to this resolution
+
+4. **Diversity**:
+   - Different characters, scenes, and art styles
+   - Various line styles (from simple to complex)
+
+5. **Preprocessing**:
+   - White background with black lines recommended for sketches
+   - Remove background interference
+   - Properly align sketch and image pairs
+
+## Usage
+
+### 1. Data Preparation
+
+Place the sketch-image paired dataset in the appropriate subdirectory of the `data/` directory:
+
+```bash
+mkdir -p data/train data/validation
+# Put training data in data/train
+# Put validation data in data/validation
+```
+
+### 2. Canny Parameter Optimization (Optional)
+
+Run the Canny parameter optimization experiment to find the best edge detection parameters:
 
 ```bash
 python scripts/optimize_canny.py --input_dir data/sketches --output_dir data/processed
 ```
 
-### 3. 模型训练
+### 3. Model Training
+
+There are two ways to train the model: directly using sketches or through Canny edges. You can set this in the configuration file:
 
 ```bash
+# Train using config file
 python train/train_adapter.py --config configs/train_config.yaml
+
+# Or specify a model ID to upload to Hugging Face
+python train/train_adapter.py --config configs/train_config.yaml --push_to_hub --hub_model_id "your-username/sketch2anime"
 ```
 
-### 4. 推理生成
+#### Training Configuration
+
+In `configs/train_config.yaml`, you can set:
+
+- `model.train_scheduler`: Scheduler used for training ("ddpm" or "euler_ancestral")
+- `model.inference_scheduler`: Scheduler used for inference (recommended "euler_ancestral")
+- `training_approach`: Training method ("direct_sketch" or "canny_edge")
+
+### 4. Inference Generation
+
+Use the trained model to generate images:
 
 ```bash
-python inference/generate.py --sketch path/to/your/sketch.jpg --output output.png
+# Single image generation
+python inference/generate.py --sketch path/to/your/sketch.jpg --output output.png --model_path ./results/checkpoint-10000
+
+# Batch processing
+python inference/generate.py --batch --input_dir ./sketches --output_dir ./outputs --model_path ./results/checkpoint-10000
+
+# Add text prompt (optional)
+python inference/generate.py --sketch path/to/your/sketch.jpg --output output.png --prompt "anime girl with blue hair"
 ```
 
-## 许可证
+## Scheduler Options
+
+This project supports two schedulers:
+
+1. **DDPMScheduler**:
+   - More stable training process
+   - Requires more sampling steps
+   - Suitable for the training phase
+
+2. **EulerAncestralDiscreteScheduler**:
+   - Faster inference speed
+   - Uses fewer sampling steps (20-30 steps) to get high-quality results
+   - Generated results are more diverse with richer details
+   - Recommended for the inference phase
+
+## License
 
 MIT License 

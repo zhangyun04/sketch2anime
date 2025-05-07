@@ -28,6 +28,7 @@ import diffusers
 from diffusers import (
     AutoencoderKL,
     DDPMScheduler,
+    EulerAncestralDiscreteScheduler,
     StableDiffusionXLAdapterPipeline,
     T2IAdapter,
     UNet2DConditionModel,
@@ -274,10 +275,19 @@ def main():
     )
     
     # Load noise scheduler for training
-    noise_scheduler = DDPMScheduler.from_pretrained(
-        config["model"]["pretrained_model_name_or_path"],
-        subfolder="scheduler",
-    )
+    train_scheduler_type = config["model"].get("train_scheduler", "ddpm")
+    if train_scheduler_type.lower() == "euler_ancestral":
+        noise_scheduler = EulerAncestralDiscreteScheduler.from_pretrained(
+            config["model"]["pretrained_model_name_or_path"],
+            subfolder="scheduler",
+        )
+        logger.info("Using EulerAncestralDiscreteScheduler for training")
+    else:
+        noise_scheduler = DDPMScheduler.from_pretrained(
+            config["model"]["pretrained_model_name_or_path"],
+            subfolder="scheduler",
+        )
+        logger.info("Using DDPMScheduler for training")
     
     # Load UNet
     unet = UNet2DConditionModel.from_pretrained(
