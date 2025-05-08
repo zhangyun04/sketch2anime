@@ -12,6 +12,7 @@ import cv2
 from PIL import Image, ImageOps
 import torch
 from typing import Tuple, Optional, Union
+from controlnet_aux.canny import CannyDetector
 
 
 def resize_image(image, target_size=1024):
@@ -45,7 +46,7 @@ def resize_image(image, target_size=1024):
 
 def apply_canny(image, low_threshold=100, high_threshold=200):
     """
-    Apply Canny edge detection to an image.
+    Apply Canny edge detection to an image using controlnet_aux CannyDetector.
     
     Args:
         image: PIL Image or numpy array
@@ -55,21 +56,23 @@ def apply_canny(image, low_threshold=100, high_threshold=200):
     Returns:
         PIL Image with Canny edges
     """
-    if isinstance(image, Image.Image):
-        # Convert PIL image to numpy array
-        image_np = np.array(image.convert("L"))
-    else:
-        # Assume it's already a numpy array
-        image_np = image
-        if len(image_np.shape) == 3:
-            # Convert RGB to grayscale
-            image_np = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
+    # Initialize CannyDetector from controlnet_aux (used in the notebook)
+    canny_detector = CannyDetector()
     
-    # Apply Canny edge detection
-    edges = cv2.Canny(image_np, low_threshold, high_threshold)
+    # Process the image with CannyDetector
+    if isinstance(image, np.ndarray):
+        # Convert numpy array to PIL Image if needed
+        if len(image.shape) == 3:
+            # RGB image
+            image = Image.fromarray(image)
+        else:
+            # Grayscale image
+            image = Image.fromarray(image).convert("L")
     
-    # Convert back to PIL
-    return Image.fromarray(edges)
+    # Apply Canny edge detection - returns a PIL Image
+    detected_edges = canny_detector(image, low_threshold=low_threshold, high_threshold=high_threshold)
+    
+    return detected_edges
 
 
 def process_sketch(sketch_path, method="direct", canny_low=100, canny_high=200, target_size=1024):
@@ -122,7 +125,6 @@ def find_optimal_canny_params(image_path, min_low=50, max_low=150, min_high=150,
         Dictionary of optimal parameters and results
     """
     image = Image.open(image_path).convert("L")
-    image_np = np.array(image)
     
     best_score = -float('inf')
     best_params = None
@@ -130,16 +132,17 @@ def find_optimal_canny_params(image_path, min_low=50, max_low=150, min_high=150,
     
     for low in range(min_low, max_low + 1, step):
         for high in range(low + step, max_high + 1, step):
-            # Apply Canny
-            edges = cv2.Canny(image_np, low, high)
+            # Apply Canny using controlnet_aux
+            edges = apply_canny(image, low, high)
+            edges_np = np.array(edges)
             
             # Calculate score based on edge density and continuity
-            edge_density = np.sum(edges > 0) / (edges.shape[0] * edges.shape[1])
+            edge_density = np.sum(edges_np > 0) / (edges_np.shape[0] * edges_np.shape[1])
             
             # Simple continuity metric using dilation and edge count ratio
             kernel = np.ones((3, 3), np.uint8)
-            dilated = cv2.dilate(edges, kernel, iterations=1)
-            continuity = np.sum(edges > 0) / (np.sum(dilated > 0) + 1e-6)
+            dilated = cv2.dilate(edges_np, kernel, iterations=1)
+            continuity = np.sum(edges_np > 0) / (np.sum(dilated > 0) + 1e-6)
             
             # Combined score - we want reasonable density with good continuity
             score = (edge_density * 0.4) + (continuity * 0.6)
@@ -155,7 +158,7 @@ def find_optimal_canny_params(image_path, min_low=50, max_low=150, min_high=150,
         "edge_density": edge_density,
         "continuity": continuity,
         "score": best_score,
-        "edges": Image.fromarray(best_edges)
+        "edges": best_edges
     }
 
 
